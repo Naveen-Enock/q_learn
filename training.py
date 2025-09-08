@@ -30,16 +30,14 @@ device = torch.device(
 
 
 
-seed = 42
-random.seed(seed)
-torch.manual_seed(seed)
-env.reset(seed=seed)
-env.action_space.seed(seed)
-env.observation_space.seed(seed)
-if torch.cuda.is_available(): 
-    torch.cuda.manual_seed(seed)
-
-#
+# seed = 42
+# random.seed(seed)
+# torch.manual_seed(seed)
+# env.reset(seed=seed)
+# env.action_space.seed(seed)
+# env.observation_space.seed(seed)
+# if torch.cuda.is_available(): 
+#     torch.cuda.manual_seed(seed)
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
@@ -83,8 +81,8 @@ class DQN(nn.Module):
 BATCH_SIZE = 128
 GAMMA = 0.99
 EPS_START = 0.9
-EPS_END = 0.01
-EPS_DECAY = 2500
+EPS_END = 0.02
+EPS_DECAY = 2000
 TAU = 0.005
 LR = 3e-4
 
@@ -123,6 +121,7 @@ def select_action(state):
 
 
 episode_durations = []
+reward_history = []
 
 
 def plot_durations(show_result=False):
@@ -150,6 +149,18 @@ def plot_durations(show_result=False):
         else:
             display.display(plt.gcf())
 
+def plot_reward_history(reward_history):
+    plt.figure(2)
+    plt.clf()
+    plt.title('Reward History')
+    plt.xlabel('Episode')
+    plt.ylabel('Reward')
+    total_reward = torch.tensor(reward_history, dtype=torch.float)
+    plt.plot(total_reward.numpy())
+    plt.pause(0.001)  # pause a bit so that plots are updated
+    if is_ipython:
+        display.display(plt.gcf())
+        display.clear_output(wait=True)
 
 ######################################################################
 # Training loop
@@ -234,18 +245,22 @@ def optimize_model():
 if torch.cuda.is_available() or torch.backends.mps.is_available():
     num_episodes = 600
 else:
-    num_episodes = 600
+    num_episodes = 1200
 
 for i_episode in range(num_episodes):
     # Initialize the environment and get its state
     state, info = env.reset()
     state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+    episode_reward = 0
     for t in count():
         action = select_action(state)
         observation, reward, terminated, truncated, _ = env.step(action.item())
-        reward = torch.tensor([reward], device=device)
+        height_reward = F.relu(torch.tensor(observation[0]+0.5, device=device)) - 0.5  # Reward based on the height of the car
+        if(observation[0] >= 0.5):
+            height_reward = torch.tensor(1, device=device)
+        reward = torch.tensor([height_reward.item()], device=device)
+        episode_reward += reward.item()
         done = terminated or truncated
-
         if terminated:
             next_state = None
         else:
@@ -267,16 +282,23 @@ for i_episode in range(num_episodes):
         for key in policy_net_state_dict:
             target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
         target_net.load_state_dict(target_net_state_dict)
-
         if done:
             episode_durations.append(t + 1)
             plot_durations()
+            reward_history.append(episode_reward)
+            plot_reward_history(reward_history)
             break
+
 
 print('Complete')
 plot_durations(show_result=True)
 plt.ioff()
 plt.show()
+
+# Save the trained model weights
+torch.save(policy_net.state_dict(), 'policy_net_weights.pth')
+torch.save(target_net.state_dict(), 'target_net_weights.pth')
+print('Model weights saved to policy_net_weights.pth and target_net_weights.pth')
 
 ######################################################################
 # Here is the diagram that illustrates the overall resulting data flow.
